@@ -9,6 +9,8 @@ def get_screen_dims(master, video, update=False):
     if update:
         _height = master.winfo_height()
         _width = master.winfo_width()
+        if _height < 100 or _width <100:
+            _height, _width = 900, 800
         w, h = min(_width, video.width), min(_height, video.height)
     else:
         _width = master.winfo_screenwidth()
@@ -42,6 +44,7 @@ class VideoPlayer(ttk.Frame):
         if self.state == 'play':
             self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
             ret, frame = video.get_frame()
+            print(self.w, self.h)
             if ret:
                 self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame, (self.w, self.h))))
                 self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
@@ -79,8 +82,10 @@ class AnytrackApp(ttk.Frame):
     def __init__(self, master=None, model=None):
         self.master = master
         master.title("AnyTrack v1.0")
+        master.geometry("800x900")
         ttk.Frame.__init__(self, master)
-        self.video_source = '/Volumes/DashDATA/working_data/2019_04_23/cam01_2019-04-23T10_32_40.avi'
+        #self.video_source = '/Volumes/DashDATA/working_data/2019_04_23/cam01_2019-04-23T10_32_40.avi'
+        self.video_source = '/home/degoldschmidt/Desktop/example_data/cam01_2018-08-09T15_16_20.avi'
         self.vid = vc.VideoCapture(self.video_source)
         self.__init(model)
         self.delay = 20
