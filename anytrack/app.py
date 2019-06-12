@@ -44,7 +44,6 @@ class VideoPlayer(ttk.Frame):
         if self.state == 'play':
             self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
             ret, frame = video.get_frame()
-            print(self.w, self.h)
             if ret:
                 self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame, (self.w, self.h))))
                 self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
@@ -59,7 +58,7 @@ class VideoPlayer(ttk.Frame):
             self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
             ret, (frame, thr) = video.tracking()
             if ret:
-                self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(thr.astype(np.uint8), (self.w, self.h))))
+                self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame.astype(np.uint8), (self.w, self.h))))
                 self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
 
 

@@ -67,4 +67,6 @@ class BackgroundSubtraction:
         #    self.bg = self.__adaptrate * image + (1 - self.__adaptrate) * self.bg
         __, strong_sub = cv2.threshold(difference, self.__thrval, 255, self.__thr)
         #__, weak_sub = cv2.threshold(difference, self.__wthrval, 255, self.__thr)
-        return frame, strong_sub
+        out = frame[:,:,0].copy()
+        out[difference<self.__thrval] = 255.
+        return out, strong_sub
