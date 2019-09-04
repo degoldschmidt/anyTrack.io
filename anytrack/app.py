@@ -5,33 +5,13 @@ import cv2
 import PIL.Image, PIL.ImageTk
 import video_capture as vc
 
-def get_screen_dims(master, video, update=False):
-    if update:
-        _height = master.winfo_height()
-        _width = master.winfo_width()
-        if _height < 100 or _width <100:
-            _height, _width = 900, 800
-        w, h = min(_width, video.width), min(_height, video.height)
-    else:
-        _width = master.winfo_screenwidth()
-        _height = master.winfo_screenheight()
-        w, h = min(2*_width/3, video.width), min(2*_height/3, video.height)
-    if video.aratio > w/h:
-        h = w/video.aratio
-    else:
-        w = h*video.aratio
-    return int(w), int(h)
-
-class Model():
-    def __init__(self):
-        self.mode = tk.StringVar()
-
 class VideoPlayer(ttk.Frame):
     def __init__(self, master=None, mode_var=None, video=None):
         ttk.Frame.__init__(self, master)
+        self.video = None##vc.VideoCapture(self.video_source)
         self.__mode = mode_var
-        self.w, self.h = get_screen_dims(master, video)
-        self.canvas = tk.Canvas(self, width = self.w, height = self.h)
+        self.w, self.h = 500, 500
+        self.canvas = tk.Canvas(self, width = self.w, height = self.h, bg='#393939')
         self.state = 'play'
         self.__packing()
 
@@ -40,24 +20,33 @@ class VideoPlayer(ttk.Frame):
         tk.Grid.rowconfigure(self, 0, weight=1)
         tk.Grid.columnconfigure(self, 0, weight=1)
 
-    def update(self, video):
-        if self.state == 'play':
-            self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
-            ret, frame = video.get_frame()
-            if ret:
-                self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame, (self.w, self.h))))
-                self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
-        elif self.state == 'background':
-            self.__mode.set('Background frame')
-            ret, frame = video.get_background()
-            if ret:
-                self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame.astype(np.uint8), (self.w, self.h))))
-                self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
-            self.state = 'idle'
-        elif self.state == 'tracking':
-            self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
-            ret, (frame, thr) = video.tracking()
-            if ret:
+    def update(self):
+        if self.video is not None:
+            if self.state == 'play':
+                self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
+                ret, frame = video.get_frame()
+                if ret:
+                    self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame, (self.w, self.h))))
+                    self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
+            elif self.state == 'background':
+                self.__mode.set('Background frame')
+                ret, frame = video.get_background()
+                if ret:
+                    self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame.astype(np.uint8), (self.w, self.h))))
+                    self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
+                self.state = 'idle'
+            elif self.state == 'tracking':
+                self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
+                ret, (frame, thr) = video.subtract()
+                if ret:
+                    self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame.astype(np.uint8), (self.w, self.h))))
+                    self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
+            elif self.state == 'contours':
+                self.__mode.set('{:06d}/{:06d}'.format(int(video.get(cv2.CAP_PROP_POS_FRAMES)), video.len))
+                ret, frame = video.get_frame()
+                ret, (frame2, thr) = video.subtract()
+                contours = video.track(thr)
+                cv2.drawContours(frame, contours, -1, (0,255,0), 1)
                 self.photo = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.resize(frame.astype(np.uint8), (self.w, self.h))))
                 self.canvas.create_image(0, 0, image = self.photo, anchor = tk.NW)
 
@@ -78,14 +67,11 @@ class LabelFrm(ttk.Frame):
         tk.Grid.columnconfigure(self, 0, weight=1)
 
 class AnytrackApp(ttk.Frame):
-    def __init__(self, master=None, model=None):
+    def __init__(self, master=None, model=None, videos=None):
         self.master = master
         master.title("AnyTrack v1.0")
-        master.geometry("800x900")
+        master.geometry("1200x1000")
         ttk.Frame.__init__(self, master)
-        #self.video_source = '/Volumes/DashDATA/working_data/2019_04_23/cam01_2019-04-23T10_32_40.avi'
-        self.video_source = '/home/degoldschmidt/Desktop/example_data/cam01_2018-08-09T15_16_20.avi'
-        self.vid = vc.VideoCapture(self.video_source)
         self.__init(model)
         self.delay = 20
         self.__bind()
@@ -103,6 +89,8 @@ class AnytrackApp(ttk.Frame):
         elif event.keysym == 't':
             self.__video.state = 'tracking'
             self.vid.restart()
+        elif event.keysym == 'c':
+            self.__video.state = 'contours'
         elif event.keysym == 'Right':
             self.vid.skip(1000)
         elif event.keysym == 'Left':
@@ -111,9 +99,29 @@ class AnytrackApp(ttk.Frame):
             print(event.keysym)
 
     def __init(self, model):
-        self.__model  = Model()
-        self.__video = VideoPlayer(self, self.__model.mode, self.vid)
-        self.__label  = LabelFrm(self,  self.__model.mode)
+        self.__video = VideoPlayer(self)
+        self.__label  = LabelFrm(self)
+        self.__info = ttk.Frame(self)
+        self.__treeview = ttk.Frame(self)
+
+        # create the tree and scrollbars
+        self.dataCols = ('country', 'capital')
+        self.tree = ttk.Treeview(columns=self.dataCols,
+                                 show = 'headings')
+
+        ysb = ttk.Scrollbar(orient=tk.VERTICAL, command= self.tree.yview)
+        xsb = ttk.Scrollbar(orient=tk.HORIZONTAL, command= self.tree.xview)
+        self.tree['yscroll'] = ysb.set
+        self.tree['xscroll'] = xsb.set
+
+        # add tree and scrollbars to frame
+        self.tree.grid(in_=self.__treeview, row=0, column=0, sticky=tk.N+tk.S+tk.E+tk.W)
+        ysb.grid(in_=self.__treeview, row=0, column=1, sticky=tk.N+tk.S)
+        xsb.grid(in_=self.__treeview, row=1, column=0, sticky=tk.E+tk.W)
+
+        # set frame resize priorities
+        self.__treeview.rowconfigure(0, weight=1)
+        self.__treeview.columnconfigure(0, weight=1)
         self.__packing()
 
     def __packing(self):
@@ -123,19 +131,20 @@ class AnytrackApp(ttk.Frame):
 
         self.__video.grid(row=0, column=0, sticky=tk.N+tk.S+tk.E+tk.W)
         self.__label.grid(row=1, column=0, sticky=tk.N+tk.S+tk.E+tk.W)
+
+        self.__treeview.grid(row=0, column=1, sticky=tk.N+tk.S+tk.E+tk.W)
+        self.__info.grid(row=1, column=1, sticky=tk.N+tk.S+tk.E+tk.W)
         tk.Grid.rowconfigure(self, 0, weight=1)
         tk.Grid.rowconfigure(self, 1, weight=1)
         tk.Grid.columnconfigure(self, 0, weight=1)
+        tk.Grid.columnconfigure(self, 1, weight=1)
 
     def __update(self):
-        self.__video.w, self.__video.h = get_screen_dims(self.master, self.vid, update=True)
-        self.__video.update(self.vid)
         self.master.after(self.delay, self.__update)
 
 def main():
     root = tk.Tk()
-    model = Model()
-    app = AnytrackApp(root, model)
+    app = AnytrackApp(root)
     root.mainloop()
 
 if __name__ == '__main__':

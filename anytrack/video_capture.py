@@ -1,5 +1,6 @@
 import cv2
 from background_subtraction import BackgroundSubtraction
+from centroid_tracker import CentroidTracker
 
 class VideoCapture:
     def __init__(self, video_source=0):
@@ -16,6 +17,7 @@ class VideoCapture:
         self.aratio = self.width/self.height
 
         self.bgsub = BackgroundSubtraction(self)
+        self.tracker = CentroidTracker()
 
     def get_background(self):
         return True, self.bgsub.bg
@@ -60,8 +62,11 @@ class VideoCapture:
     def stop(self):
         self.vid.release()
 
-    def tracking(self):
+    def subtract(self):
         return True, self.bgsub.update()
+
+    def track(self, threshold):
+        return self.tracker.update(threshold)
 
     # Release the video source when the object is destroyed
     def __del__(self):

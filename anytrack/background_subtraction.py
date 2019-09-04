@@ -19,6 +19,8 @@ class BackgroundSubtraction:
             self.bg = self.cap.frame
         self.cap.set_frame(0)
 
+        self.threshold = None
+
     def get_background(self, random=True):
         bgframe = np.zeros(self.cap.frame.shape, dtype=np.float32)
         nframes = self.cap.len - self.cap.start
@@ -65,8 +67,9 @@ class BackgroundSubtraction:
             difference = np.abs(frame[:,:,0] - self.bg)
         #if self.__adaptrate > 0:
         #    self.bg = self.__adaptrate * image + (1 - self.__adaptrate) * self.bg
-        __, strong_sub = cv2.threshold(difference, self.__thrval, 255, self.__thr)
+        __, strong_sub = cv2.threshold(difference, self.__thrval, 255, 0)# self.__thr)
         #__, weak_sub = cv2.threshold(difference, self.__wthrval, 255, self.__thr)
         out = frame[:,:,0].copy()
         out[difference<self.__thrval] = 255.
-        return out, strong_sub
+        self.threshold = strong_sub.astype(np.uint8)
+        return out, strong_sub.astype(np.uint8)
