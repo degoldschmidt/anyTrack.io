@@ -15,12 +15,23 @@ from cli import checkbox
 from roiselect import arenaROIselector
 from video import VideoCapture
 
+def smooth(y, box_pts):
+    box = np.ones(box_pts)/box_pts
+    y_smooth = np.convolve(y, box, mode='same')
+    return y_smooth
+
 def px(val):
     return int(round(val))
 
 def dist(pos1, pos2):
     dx, dy = (pos1[0] - pos2[0]), (pos1[1] - pos2[1])
     return np.sqrt(dx * dx + dy * dy)
+
+def in_roi(pos, roi):
+    if dist(pos,(roi['x'], roi['y']))<=1.1*roi['outer']:
+        return True
+    else:
+        return False
 
 def read_yaml(_file):
     """ Returns a dict of a YAML-readable file '_file'. Returns None, if file is empty. """
@@ -165,11 +176,15 @@ def load_trajectory(_file):
         trajectory.data[:,i] = np.array(df[col])
     return trajectory
 
-def run_bg_subtraction(video, background=None, threshold_level=10, thresholding='dark', show=0, n_contours=4, min_size=150, max_size=250, rois=None):
+def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, thresholding='dark', show=1, n_contours=4, min_size=150, max_size=250, rois=None):
     cap = VideoCapture(video,0)
-    flytracks = [FlyTrajectory(cap.len) for i in range(n_contours)]
-    flag = False
-    for frameno in tqdm(range(cap.len)):
+    flag=False
+    if nframes>0:
+        nframes = nframes
+    else:
+        nframes = cap.len
+    flytracks = [FlyTrajectory(nframes) for i in range(n_contours)]
+    for frameno in tqdm(range(nframes)):
         frame = cap.get_frame(frameno)
         contours = get_contours(frame, background, threshold_level=threshold_level, thresholding=thresholding)
         contours = [cnt for cnt in contours if cv2.contourArea(cnt)>.9*min_size and cv2.contourArea(cnt)<1.1*max_size]
@@ -186,43 +201,70 @@ def run_bg_subtraction(video, background=None, threshold_level=10, thresholding=
             print(popidx)
             contours.pop(popidx)
             raise IndexError
+        contour_mapping = [[in_roi(cv2.fitEllipse(cnt)[0],roi) for roi in rois].index(True) for cnt in contours] ### list of roi IDs for each contour
         if len(contours) == n_contours:
-            order = []
-            if frameno == 0:
-                order = [i for i in range(n_contours)]
-            for j,cnt in enumerate(contours):
-                if frameno > 0:
-                    min_dists = [dist((flytrack.x[frameno-1],flytrack.y[frameno-1]), cv2.fitEllipse(cnt)[0]) for flytrack in flytracks]
-                    idx = min_dists.index(min(min_dists))
-                    order.append(idx)
-            if len(order) != len(set(order)):
-                flag = True
-            for j in order:
-                ellipse = cv2.fitEllipse(contours[j])
+            """
+            if len(contour_mapping) != len(set(contour_mapping)):
+                order = []
+                if frameno == 0:
+                    order = [i for i in range(n_contours)]
+                for j,cnt in enumerate(contours):
+                    if frameno > 0:
+                        min_dists = [dist((flytrack.x[frameno-1],flytrack.y[frameno-1]), cv2.fitEllipse(cnt)[0]) for flytrack in flytracks]
+                        idx = min_dists.index(min(min_dists))
+                        order.append(idx)
+                if len(order) != len(set(order)):
+                    flag = True
+            else:
+            """
+            order = contour_mapping
+            for j,cnt in zip(order,contours):
+                ellipse = cv2.fitEllipse(cnt)
                 (x,y),(ma,mi),a = ellipse
-                flytracks[j].append(x=x,y=y,ma=ma,mi=mi,angle=a)
-                cv2.ellipse(output,ellipse,(0,255,0),2)
+                #cv2.ellipse(output,ellipse,(0,255,0),2)
                 cv2.circle(output,(px(x),px(y)), 1, (255,0,255),1)
-                pts = flytracks[j].data[frameno-30:frameno,0:2].astype(np.int32)
+                ax, ay = x+0.4*mi*np.cos(np.radians(a)+np.pi/2), y+0.4*mi*np.sin(np.radians(a)+np.pi/2)
+                ox, oy = x-0.4*mi*np.cos(np.radians(a)+np.pi/2), y-0.4*mi*np.sin(np.radians(a)+np.pi/2)
+                if frameno>0:
+                    oax, oay = flytracks[j].data[frameno-1,7], flytracks[j].data[frameno-1,8]
+                    oox, ooy = flytracks[j].data[frameno-1,9], flytracks[j].data[frameno-1,10]
+                    if dist((ax, ay), (oax, oay))+dist((ox, oy), (oox, ooy))  > dist((ox, oy), (oax, oay))+dist((ax, ay), (oox, ooy)):
+                        ax,ay,ox,oy=ox,oy,ax,ay
+                px_a, px_o = frame[px(ay),px(ax),0], frame[px(oy),px(ox),0]
+                flytracks[j].append(i=frameno,x=x,y=y,ma=ma,mi=mi,angle=a, ax=ax, ay=ay, ox=ox, oy=oy, apx=px_a, opx=px_o)
+                cv2.circle(output,(px(ax),px(ay)), 2, (255,0,0),1)
+                cv2.circle(output,(px(ox),px(oy)), 2, (0,0,255),1)
+                cv2.putText(output, '{}'.format(px_a), (px(ax)+5, px(ay)+5), cv2.FONT_HERSHEY_SIMPLEX, .5, (255,0,0), 1, cv2.LINE_AA)
+                cv2.putText(output, '{}'.format(px_o), (px(ox)+5, px(oy)+5), cv2.FONT_HERSHEY_SIMPLEX, .5, (0,0,255), 1, cv2.LINE_AA)
+                pts = flytracks[j].data[:frameno,0:2].astype(np.int32)
                 ##print(pts.shape, pts)
                 pts = pts.reshape((-1,1,2))
-                cv2.polylines(output,[pts],False,(0,255,255))
-                cv2.putText(output, '{}'.format(j), (px(x)+10, px(y)+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,255), 1, cv2.LINE_AA)
+                #cv2.polylines(output,[pts],False,(0,255,255))
+                #cv2.putText(output, '{}'.format(j), (px(x)+10, px(y)+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,255), 1, cv2.LINE_AA)
+            for id, arena in enumerate(rois):
+                ### draw arenas
+                x, y, r, o  = int(arena['x']), int(arena['y']), int(arena['radius']), int(arena['outer'])
+                color = (255,255,255)
+                cv2.circle(output,(x, y),r,color,1)
+                cv2.circle(output,(x, y),int(1.1*o),color,1)
+                cv2.circle(output,(x, y),1,color,-1)
+                cv2.rectangle(output, (px(x-1.5*r),px(y-1.5*r)), (px(x+1.5*r), px(y+1.5*r)), color, 1)
+                cv2.putText(output, str(id), (x+10, y-10), cv2.FONT_HERSHEY_SIMPLEX , .5, color, 1, cv2.LINE_AA)
         if show>0 or flag:
             if frameno%show==0 or flag:
-                cv2.imshow("Tracking", cv2.resize(output, (700,700)))
+                x,y,r = flytracks[0].data[frameno,0], flytracks[0].data[frameno,1], 100
+                cv2.imshow("Tracking", cv2.resize(output[int(y-r):int(y+r), int(x-r):int(x+r)], (700,700)))
                 if flag:
                     cv2.waitKey(0) # time to wait between frames, in mSec
                     flag = False
                 else:
                     cv2.waitKey(1) # time to wait between frames, in mSec
-
     return flytracks
 
 class FlyTrajectory(object):
     def __init__(self, num_frames):
         self.columns = ['body_x', 'body_y', 'head_x', 'head_y', 'major', 'minor', 'angle']
-        self.data = np.zeros((num_frames,len(self.columns)))
+        self.data = np.zeros((num_frames,len(self.columns)+6))
         self.data[:] = np.nan
         self.x = self.data[:,0]
         self.y = self.data[:,1]
@@ -233,29 +275,36 @@ class FlyTrajectory(object):
         self.angle = self.data[:,6]
         self.i = 0
 
-    def append(self, x=None, y=None, hx=None, hy=None, ma=None, mi=None, angle=None):
+    def append(self, i, x=None, y=None, hx=None, hy=None, ma=None, mi=None, angle=None, ax=None, ay=None, ox=None, oy=None, apx=None, opx=None):
         if x is not None:
-            self.data[self.i, 0] = x
+            self.data[i, 0] = x
         if y is not None:
-            self.data[self.i, 1] = y
+            self.data[i, 1] = y
         if hx is not None:
-            self.data[self.i, 2] = hx
+            self.data[i, 2] = hx
         if hy is not None:
-            self.data[self.i, 3] = hy
+            self.data[i, 3] = hy
         if ma is not None:
-            self.data[self.i, 4] = ma
+            self.data[i, 4] = ma
         if mi is not None:
-            self.data[self.i, 5] = mi
+            self.data[i, 5] = mi
         if angle is not None:
-            self.data[self.i, 6] = angle
-        self.i += 1
+            self.data[i, 6] = angle
+        if ax is not None:
+            self.data[i, 7] = ax
+        if ay is not None:
+            self.data[i, 8] = ay
+        if ox is not None:
+            self.data[i, 9] = ox
+        if oy is not None:
+            self.data[i, 10] = oy
+        if apx is not None:
+            self.data[i, 11] = apx
+        if opx is not None:
+            self.data[i, 12] = opx
 
-
-    def reset(self):
-        self.i=0
-
-    def trace(self,_len):
-        return self.data[self.i-_len:self.i,0:2]
+    def trace(self,i,_len):
+        return self.data[i-_len:i,0:2]
 
 class Tracking(object):
     def __init__(self, input=None, output=None):
@@ -351,10 +400,22 @@ class Tracking(object):
                 self.background[video] = get_background(video, show_all=True, frames=only_these)
                 cv2.imwrite(self.outdict['background_files'][video], self.background[video])
 
-    def run(self, threshold_level=10, thresholding='dark', use_threads=1):
+    def run(self, nframes=0, threshold_level=10, thresholding='dark', use_threads=1, show=0):
         print('Run tracking...', flush=True)
+        all_tracks = {}
         for video in tqdm(self.videos):
-            run_bg_subtraction(video, background=self.background[video], threshold_level=threshold_level, thresholding=thresholding, n_contours=self.outdict['number_contours'][video], min_size=self.outdict['min_size'][video], max_size=self.outdict['max_size'][video])
+            tracks = run_bg_subtraction(    video,
+                                            nframes=nframes,
+                                            background=self.background[video],
+                                            threshold_level=threshold_level,
+                                            thresholding=thresholding,
+                                            n_contours=self.outdict['number_contours'][video],
+                                            min_size=self.outdict['min_size'][video],
+                                            max_size=self.outdict['max_size'][video],
+                                            rois=self.outdict['ROIs'][video],
+                                            show=show,)
+            all_tracks[video] = tracks
+        return all_tracks
 
 
     def roi_select(self, method='automated'):
@@ -395,7 +456,16 @@ def main():
     track.infer()
     try:
         ### step 5: background subtraction & contour matching & centroid fit & identity (DONE, frame -> contours -> centroid+pixelinfo)
-        track.run()
+        flytracks = track.run(show=0)
+        for video in track.videos:
+            f,axes = plt.subplots(len(flytracks[video]))
+            for fly,ax in zip(flytracks[video],axes):
+                #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,11], 'r.')
+                #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,12], 'b.')
+                windowlen = 13
+                ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,11], windowlen), 'r-')
+                ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,12], windowlen), 'b-')
+            plt.show()
 
         ### step 6: head detection
 

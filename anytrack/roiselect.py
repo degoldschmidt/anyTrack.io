@@ -323,12 +323,12 @@ class arenaROIselector(object):
         self.draw()
 
     def get(self):
-        rois = {}
+        rois = []
         for id, roi in enumerate(self.ROIs):
             if roi is None:
                 pass
             else:
-                rois[id] = {}
+                rois.append({})
                 rois[id]['x'] = round(roi['x'] * self.__scale,1)
                 rois[id]['y'] = round(roi['y'] * self.__scale,1)
                 rois[id]['radius'] = round(float(roi['radius'] * self.__scale),1)
