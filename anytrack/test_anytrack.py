@@ -231,7 +231,7 @@ def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, th
                     if dist((ax, ay), (oax, oay))+dist((ox, oy), (oox, ooy))  > dist((ox, oy), (oax, oay))+dist((ax, ay), (oox, ooy)):
                         ax,ay,ox,oy=ox,oy,ax,ay
                 px_a, px_o = frame[px(ay),px(ax),0], frame[px(oy),px(ox),0]
-                flytracks[j].append(i=frameno,x=x,y=y,ma=ma,mi=mi,angle=a, ax=ax, ay=ay, ox=ox, oy=oy, apx=px_a, opx=px_o)
+                flytracks[j].append(i=frameno,x=x,y=y,ma=mi,mi=ma,angle=a, ax=ax, ay=ay, ox=ox, oy=oy, apx=px_a, opx=px_o)
                 cv2.circle(output,(px(ax),px(ay)), 2, (255,0,0),1)
                 cv2.circle(output,(px(ox),px(oy)), 2, (0,0,255),1)
                 cv2.putText(output, '{}'.format(px_a), (px(ax)+5, px(ay)+5), cv2.FONT_HERSHEY_SIMPLEX, .5, (255,0,0), 1, cv2.LINE_AA)
@@ -303,6 +303,11 @@ class FlyTrajectory(object):
         if opx is not None:
             self.data[i, 12] = opx
 
+    def save(self, _file):
+        self.data[:,6] = np.arctan2(self.data[:,3] - self.data[:,1], self.data[:,2] - self.data[:,0])
+        print('Saving flytracks to {}'.format(_file))
+        pd.DataFrame(columns=self.columns, data=self.data[:,:len(self.columns)]).to_csv(_file, index_label='frame')
+
     def trace(self,i,_len):
         return self.data[i-_len:i,0:2]
 
@@ -317,20 +322,24 @@ class Tracking(object):
             outdict = read_yaml(outdict_file)
         else:
             outdict = {}
-        if 'folders' not in outdict:
-            outdict['directory'] = input
-            outdict['folders'] = {}
-            outdict['folders']['background'] = op.join(input, output, 'bg')
-            outdict['folders']['image_stats'] = op.join(input, output, 'image_stats')
-            outdict['folders']['output'] = outfolder
-            for f in outdict['folders']:
-                os.makedirs(outdict['folders'][f], exist_ok=True)
+        #if 'folders' not in outdict:
+        outdict['directory'] = input
+        outdict['folders'] = {}
+        outdict['folders']['background'] = op.join(outfolder, 'bg')
+        outdict['folders']['image_stats'] = op.join(outfolder, 'image_stats')
+        outdict['folders']['trajectories'] = op.join(outfolder, 'trajectories')
+        outdict['folders']['output'] = outfolder
+        for f in outdict['folders']:
+            os.makedirs(outdict['folders'][f], exist_ok=True)
         ### getting videos based on input
         self.videos, basedir = get_videos(input, outdict)
         outdict['videos'] = self.videos
         self.outdict=outdict
         self.outdict_file = outdict_file
         self.background = {}
+
+    def detect_head(self, flytracks):
+        return flytracks
 
     def infer(self):
         print('Infer contour statistics...', flush=True)
@@ -454,22 +463,28 @@ def main():
 
     ### step 4: infer contour statistics (DONE)
     track.infer()
-    try:
-        ### step 5: background subtraction & contour matching & centroid fit & identity (DONE, frame -> contours -> centroid+pixelinfo)
-        flytracks = track.run(show=0)
-        for video in track.videos:
-            f,axes = plt.subplots(len(flytracks[video]))
-            for fly,ax in zip(flytracks[video],axes):
-                #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,11], 'r.')
-                #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,12], 'b.')
-                windowlen = 13
-                ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,11], windowlen), 'r-')
-                ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,12], windowlen), 'b-')
-            plt.show()
 
+    ### step 5: background subtraction & contour matching & centroid fit & identity (DONE, frame -> contours -> centroid+pixelinfo)
+    flytracks = track.run(nframes=100,show=0)
+    """
+    for video in track.videos:
+        f,axes = plt.subplots(len(flytracks[video]))
+        for fly,ax in zip(flytracks[video],axes):
+            #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,11], 'r.')
+            #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,12], 'b.')
+            windowlen = 13
+            ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,11], windowlen), 'r-')
+            ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,12], windowlen), 'b-')
+        plt.show()
+    """
+    try:
         ### step 6: head detection
+        flytracks = track.detect_head(flytracks)
 
         ### step 7: writing data
+        for video in track.videos:
+            for i,fly in enumerate(flytracks[video]):
+                fly.save(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
 
         pprint(track.outdict)
         write_yaml(track.outdict_file, track.outdict)
