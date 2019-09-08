@@ -15,6 +15,42 @@ from cli import checkbox
 from roiselect import arenaROIselector
 from video import VideoCapture
 
+def rle(inarray):
+    """ run length encoding. Partial credit to R rle function.
+        Multi datatype arrays catered for including non Numpy
+        returns: tuple (runlengths, startpositions, values) """
+    ia = np.array(inarray, dtype=np.int32)                  # force numpy
+    n = len(ia)
+    if n == 0:
+        return (None, None, None)
+    else:
+        y = np.array(ia[1:] != ia[:-1])     # pairwise unequal (string safe)
+        i = np.append(np.where(y), n - 1)   # must include last element posi
+        z = np.diff(np.append(-1, i))       # run lengths
+        p = np.cumsum(np.append(0, z))[:-1] # positions
+        return(z, p, ia[i]) # simply return array runlengths runlen, positions and states
+
+def nan_helper(y):
+    """Helper to handle indices and logical indices of NaNs.
+
+    Input:
+        - y, 1d numpy array with possible NaNs
+    Output:
+        - nans, logical indices of NaNs
+        - index, a function, with signature indices= index(logical_indices),
+          to convert logical indices of NaNs to 'equivalent' indices
+    Example:
+        >>> # linear interpolation of NaNs
+        >>> nans, x= nan_helper(y)
+        >>> y[nans]= np.interp(x(nans), x(~nans), y[~nans])
+    """
+    return np.isnan(y), lambda z: z.nonzero()[0]
+
+def interpolate(arr):
+    nans, x= nan_helper(arr)
+    arr[nans]= np.interp(x(nans), x(~nans), arr[~nans])
+    return arr
+
 def smooth(y, box_pts):
     box = np.ones(box_pts)/box_pts
     y_smooth = np.convolve(y, box, mode='same')
@@ -264,6 +300,8 @@ def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, th
 class FlyTrajectory(object):
     def __init__(self, num_frames):
         self.columns = ['body_x', 'body_y', 'head_x', 'head_y', 'major', 'minor', 'angle']
+        self.all_columns = ['body_x', 'body_y', 'head_x', 'head_y', 'major', 'minor', 'angle',
+                            'ax', 'ay', 'ox', 'oy', 'apx', 'opx']
         self.data = np.zeros((num_frames,len(self.columns)+6))
         self.data[:] = np.nan
         self.x = self.data[:,0]
@@ -304,7 +342,6 @@ class FlyTrajectory(object):
             self.data[i, 12] = opx
 
     def save(self, _file):
-        self.data[:,6] = np.arctan2(self.data[:,3] - self.data[:,1], self.data[:,2] - self.data[:,0])
         print('Saving flytracks to {}'.format(_file))
         pd.DataFrame(columns=self.columns, data=self.data[:,:len(self.columns)]).to_csv(_file, index_label='frame')
 
@@ -339,6 +376,30 @@ class Tracking(object):
         self.background = {}
 
     def detect_head(self, flytracks):
+        windowlen = 13
+        for video in self.videos:
+            f,axes = plt.subplots(len(flytracks[video]))
+            for fly,ax in zip(flytracks[video],axes):
+                apx = smooth(fly.data[:,11], windowlen)
+                opx = smooth(fly.data[:,12], windowlen)
+                diffs = opx - apx
+                binary = np.sign(diffs)
+                for rl, pos, state in zip(rle(binary)):
+                    if rl > 10: ### accept only valid switches longer than 10 frames
+                        if state == 1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,7:9]
+                        elif state == -1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,9:11]
+                        else:
+                            print(state, 'WEIRD')
+                    else:
+                        if state == 1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,9:11]
+                        elif state == -1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,7:9]
+                        else:
+                            print(state, 'WEIRD')
+                fly.data[:,6] = np.arctan2(fly.data[:,3] - fly.data[:,1], fly.data[:,2] - fly.data[:,0])
         return flytracks
 
     def infer(self):
@@ -409,10 +470,16 @@ class Tracking(object):
                 self.background[video] = get_background(video, show_all=True, frames=only_these)
                 cv2.imwrite(self.outdict['background_files'][video], self.background[video])
 
+    def overlay(self):
+        for video in tqdm(self.videos):
+            for _file in os.listdir(self.outdict['folders']['trajectories']):
+                pass
+
     def run(self, nframes=0, threshold_level=10, thresholding='dark', use_threads=1, show=0):
         print('Run tracking...', flush=True)
         all_tracks = {}
         for video in tqdm(self.videos):
+            ### run tracking
             tracks = run_bg_subtraction(    video,
                                             nframes=nframes,
                                             background=self.background[video],
@@ -423,6 +490,11 @@ class Tracking(object):
                                             max_size=self.outdict['max_size'][video],
                                             rois=self.outdict['ROIs'][video],
                                             show=show,)
+            ### interpolate all signals
+            for fly in tracks:
+                for i in range(fly.data.shape[1]):
+                    if not all(np.isnan(fly.data[:,i])):
+                        fly.data[:,i] = interpolate(fly.data[:,i])
             all_tracks[video] = tracks
         return all_tracks
 
@@ -442,14 +514,7 @@ class Tracking(object):
         return self.all_rois
 
 
-def main():
-    ### arguments parsing
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-i', dest='input', action='store',
-                        help='input file(s)/directory')
-    args = parser.parse_args()
-    input = args.input
-
+def main(input):
     ### create AnyTrack Tracking object
     track = Tracking(input=input, output='output_anytrack')
     ### step 1: batch run ROIfinder to get arenas (automated/supervised/manual) recommended to use 'supervised'
@@ -465,34 +530,24 @@ def main():
     track.infer()
 
     ### step 5: background subtraction & contour matching & centroid fit & identity (DONE, frame -> contours -> centroid+pixelinfo)
-    flytracks = track.run(nframes=100,show=0)
-    """
+    flytracks = track.run(show=0)
+
+    ### step 6: head detection
+    flytracks = track.detect_head(flytracks)
+
+    ### step 7: writing data
     for video in track.videos:
-        f,axes = plt.subplots(len(flytracks[video]))
-        for fly,ax in zip(flytracks[video],axes):
-            #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,11], 'r.')
-            #ax.plot(np.arange(fly.data.shape[0]), fly.data[:,12], 'b.')
-            windowlen = 13
-            ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,11], windowlen), 'r-')
-            ax.plot(np.arange(fly.data.shape[0]), smooth(fly.data[:,12], windowlen), 'b-')
-        plt.show()
-    """
-    try:
-        ### step 6: head detection
-        flytracks = track.detect_head(flytracks)
+        for i,fly in enumerate(flytracks[video]):
+            fly.save(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
 
-        ### step 7: writing data
-        for video in track.videos:
-            for i,fly in enumerate(flytracks[video]):
-                fly.save(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
-
-        pprint(track.outdict)
-        write_yaml(track.outdict_file, track.outdict)
-    except:
-        print("Unexpected error:", sys.exc_info()[0], sys.exc_info()[1])
-        pprint(track.outdict)
-        write_yaml(track.outdict_file, track.outdict)
-
+    pprint(track.outdict)
+    write_yaml(track.outdict_file, track.outdict)
 
 if __name__ == '__main__':
-    main()
+    ### arguments parsing
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', dest='input', action='store',
+                        help='input file(s)/directory')
+    args = parser.parse_args()
+    input = args.input
+    main(input)
