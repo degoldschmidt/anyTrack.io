@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+from anytrack.video import VideoCapture
+
 def get_background(video, num_frames=30, how='uniform', offset=0, show_all=False, frames=None):
     print('Start modelling background...', flush=True)
     cap = VideoCapture(video,0)

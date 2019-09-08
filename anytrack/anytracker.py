@@ -4,14 +4,15 @@ import os
 import os.path as op
 from tqdm import tqdm
 
-from background import get_background
-from cli import checkbox
-from contours import get_contours, get_contour_stats
-from files import get_videos
-from helpers import rle, nan_helper, interpolate, smooth, px, dist, in_roi
-from trajectory import Trajectory
-from video import VideoCapture
-from yaml_helpers import read_yaml, write_yaml
+from anytrack.background import get_background
+from anytrack.cli import checkbox
+from anytrack.contours import get_contours, get_contour_stats
+from anytrack.files import get_videos
+from anytrack.helpers import rle, nan_helper, interpolate, smooth, px, dist, in_roi
+from anytrack.roiselect import arenaROIselector
+from anytrack.trajectory import Trajectory
+from anytrack.video import VideoCapture
+from anytrack.yaml_helpers import read_yaml, write_yaml
 
 def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, thresholding='dark', show=1, n_contours=4, min_size=150, max_size=250, rois=None):
     cap = VideoCapture(video,0)
@@ -48,12 +49,12 @@ def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, th
                 ax, ay = x+0.4*mi*np.cos(np.radians(a)+np.pi/2), y+0.4*mi*np.sin(np.radians(a)+np.pi/2)
                 ox, oy = x-0.4*mi*np.cos(np.radians(a)+np.pi/2), y-0.4*mi*np.sin(np.radians(a)+np.pi/2)
                 if frameno>0:
-                    oax, oay = flytracks[j].data[frameno-1,7], flytracks[j].data[frameno-1,8]
-                    oox, ooy = flytracks[j].data[frameno-1,9], flytracks[j].data[frameno-1,10]
+                    oax, oay = flytracks[j].data[frameno-1,8], flytracks[j].data[frameno-1,9]
+                    oox, ooy = flytracks[j].data[frameno-1,10], flytracks[j].data[frameno-1,11]
                     if dist((ax, ay), (oax, oay))+dist((ox, oy), (oox, ooy))  > dist((ox, oy), (oax, oay))+dist((ax, ay), (oox, ooy)):
                         ax,ay,ox,oy=ox,oy,ax,ay
                 px_a, px_o = frame[px(ay),px(ax),0], frame[px(oy),px(ox),0]
-                flytracks[j].append(i=frameno,x=x,y=y,ma=mi,mi=ma,angle=a, ax=ax, ay=ay, ox=ox, oy=oy, apx=px_a, opx=px_o)
+                flytracks[j].append(i=frameno,x=x,y=y,ma=mi,mi=ma,angle=a,avg_px=np.nanmean(frame), ax=ax, ay=ay, ox=ox, oy=oy, apx=px_a, opx=px_o)
                 if show > 0:
                     cv2.circle(output,(px(x),px(y)), 1, (255,0,255),1)
                     cv2.circle(output,(px(ax),px(ay)), 2, (255,0,0),1)
@@ -120,29 +121,29 @@ class Anytracker(object):
         windowlen = 13
         for video in self.videos:
             for fly in flytracks[video]:
-                apx = smooth(fly.data[:,11], windowlen)
-                opx = smooth(fly.data[:,12], windowlen)
+                apx = smooth(fly.data[:,12], windowlen)
+                opx = smooth(fly.data[:,13], windowlen)
                 diffs = opx - apx
                 binary = np.sign(diffs)
                 for rl, pos, state in zip(*rle(binary)):
                     if rl > 10: ### accept only valid switches longer than 10 frames
                         if state == 1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,7:9]
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,8:10]
                         elif state == -1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,9:11]
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,10:12]
                         else:
                             print(state, 'WEIRD')
                     else:
                         if state == 1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,9:11]
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,10:12]
                         elif state == -1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,7:9]
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,8:10]
                         else:
                             print(state, 'WEIRD')
                 fly.data[:,6] = np.arctan2(fly.data[:,3] - fly.data[:,1], fly.data[:,2] - fly.data[:,0])
         return flytracks
 
-    def infer(self):
+    def infer(self, num_contours):
         print('Infer contour statistics...', flush=True)
         if 'number_contours' not in self.outdict:
             self.outdict['number_contours'] = {}
@@ -152,7 +153,7 @@ class Anytracker(object):
             if video in self.outdict['number_contours']:
                 numcnts, min_size, max_size = self.outdict['number_contours'][video], self.outdict['min_size'][video], self.outdict['max_size'][video]
             else:
-                numcnts, min_size, max_size = get_contour_stats(video, self.background[video])
+                numcnts, min_size, max_size = get_contour_stats(video, self.background[video], force_num_contours=num_contours)
                 self.outdict['number_contours'][video] = int(round(numcnts))
                 self.outdict['min_size'][video] = float(min_size)
                 self.outdict['max_size'][video] = float(max_size)
@@ -199,15 +200,13 @@ class Anytracker(object):
             if video not in self.outdict['background_files']:
                 self.outdict['background_files'][video] = op.join(self.outdict['folders']['background'], '{}_bg.png'.format(op.basename(video).split('.')[0]))
             if op.isfile(self.outdict['background_files'][video]):
-                print('Loading background file...', end='', flush=True)
                 self.background[video] = cv2.imread(self.outdict['background_files'][video])[:,:,0]
-                print('[DONE]')
             else:
                 if baselines is not None:
                     only_these = np.where(baselines[video]==0)[0]
                 else:
                     only_these = None
-                self.background[video] = get_background(video, show_all=True, frames=only_these)
+                self.background[video] = get_background(video, frames=only_these)
                 cv2.imwrite(self.outdict['background_files'][video], self.background[video])
 
     def overlay(self):

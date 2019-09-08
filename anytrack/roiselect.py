@@ -8,7 +8,8 @@ import uuid
 from pathlib import Path
 import pprint as pp
 import pytrack
-from video import VideoCapture
+
+from anytrack.video import VideoCapture
 
 __author__ = "Dennis Goldschmidt"
 __date__ = "29.08.2018"
@@ -52,7 +53,7 @@ class arenaROIselector(object):
             # automatic detection of arenas
             blur = cv2.GaussianBlur(self.original_img.copy()[:,:,0],(5,5),0)
             ret3,th3 = cv2.threshold(blur,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-            im2, contours, hierarchy = cv2.findContours(th3, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours, hierarchy = cv2.findContours(th3, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             self.auto_rois = contours
             for cnt in contours:
                 if len(cnt) > 50:
@@ -68,7 +69,6 @@ class arenaROIselector(object):
                 self.windowName = "Arena ROI Selection"
                 self.draw()
                 cv2.setMouseCallback(self.windowName, self.click)
-
             self.mainloop()
 
     def init_frame(self, video, setup, nframes, random, start_frame=0):

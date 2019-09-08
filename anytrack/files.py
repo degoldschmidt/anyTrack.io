@@ -1,5 +1,6 @@
 import os
 import os.path as op
+from anytrack.cli import checkbox
 
 def get_videos(input, output, video=None):
     if 'videos' in output:

@@ -18,9 +18,8 @@ def main():
     ### create AnyTrack Tracking object
     track = Anytracker(input=input, output='output_anytrack')
     ### step 1: batch run ROIfinder to get arenas (automated/supervised/manual) recommended to use 'supervised'
-    track.roi_select(method='supervised')
+    track.roi_select(method='automated')
     write_yaml(track.outdict_file, track.outdict)
-
 
     ### step 2: get image statistics (average signal over time, )
     avg_pxs = track.image_stats(skip=30)
@@ -35,10 +34,10 @@ def main():
     write_yaml(track.outdict_file, track.outdict)
 
     ### step 5: background subtraction & contour matching & centroid fit & identity (DONE, frame -> contours -> centroid+pixelinfo)
-    flytracks = track.run(nframes=100, show=0)
+    #flytracks = track.run(nframes=100, show=0)
 
     ### step 6: head detection
-    flytracks = track.detect_head(flytracks)
+    #flytracks = track.detect_head(flytracks)
 
     ### step 7: writing data
     track.outdict['trajectory_files'] = {}
