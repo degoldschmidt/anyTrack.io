@@ -1,5 +1,5 @@
 import argparse
-from test_anytrack import Tracking
+from anytracker import Anytracker
 from video import VideoCapture
 import numpy as np
 import pandas as pd
@@ -12,7 +12,7 @@ def px(*args):
 
 def main(input, nframes):
     ### create AnyTrack Tracking object
-    track = Tracking(input=input, output='output_anytrack')
+    track = Anytracker(input=input, output='output_anytrack')
     for video in track.videos:
         cap = VideoCapture(video, 0)
         w,h = cap.w, cap.h
