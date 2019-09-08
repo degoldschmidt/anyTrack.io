@@ -52,5 +52,5 @@ class VideoCapture:
     def restart(self):
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.start)
 
-    def stop(self):
+    def release(self):
         self.cap.release()

@@ -188,19 +188,17 @@ def get_background(video, num_frames=30, how='uniform', offset=0, show_all=False
         cv2.destroyAllWindows()
     return newbg
 
-def get_videos(input, output):
+def get_videos(input, output, video=None):
     if 'videos' in output:
         videos = [_file for _file in output['videos']]
         dir = output['directory']
     else:
-        if op.isfile(input):
-            dir = op.dirname(input)
-            videos = [input]
-        elif op.isdir(input):
+        if video is None:
             dir = input
             videos = [op.join(input, _file) for _file in os.listdir(input) if _file.endswith('avi')]
         else:
-            raise FileNotFoundError
+            dir = op.dirname(input)
+            videos = [video]
         videos = [op.join(input, _file) for _file in checkbox('videos', videos, msg='Select videos for tracking:')]
     return videos, dir
 
@@ -221,7 +219,7 @@ def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, th
         nframes = cap.len
     flytracks = [FlyTrajectory(nframes) for i in range(n_contours)]
     for frameno in tqdm(range(nframes)):
-        frame = cap.get_frame(frameno)
+        _,frame = cap.read()
         contours = get_contours(frame, background, threshold_level=threshold_level, thresholding=thresholding)
         contours = [cnt for cnt in contours if cv2.contourArea(cnt)>.9*min_size and cv2.contourArea(cnt)<1.1*max_size]
         output = frame.copy()
@@ -350,6 +348,10 @@ class FlyTrajectory(object):
 
 class Tracking(object):
     def __init__(self, input=None, output=None):
+        video=None
+        if op.isfile(input):
+            video = input
+            input = op.dirname(input)
         ### create output folder inside input folder
         outfolder = op.join(input, output)
         os.makedirs(outfolder, exist_ok=True)
@@ -369,7 +371,7 @@ class Tracking(object):
         for f in outdict['folders']:
             os.makedirs(outdict['folders'][f], exist_ok=True)
         ### getting videos based on input
-        self.videos, basedir = get_videos(input, outdict)
+        self.videos, basedir = get_videos(input, outdict, video=video)
         outdict['videos'] = self.videos
         self.outdict=outdict
         self.outdict_file = outdict_file
@@ -384,7 +386,7 @@ class Tracking(object):
                 opx = smooth(fly.data[:,12], windowlen)
                 diffs = opx - apx
                 binary = np.sign(diffs)
-                for rl, pos, state in zip(rle(binary)):
+                for rl, pos, state in zip(*rle(binary)):
                     if rl > 10: ### accept only valid switches longer than 10 frames
                         if state == 1:
                             fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,7:9]
@@ -536,8 +538,11 @@ def main(input):
     flytracks = track.detect_head(flytracks)
 
     ### step 7: writing data
+    track.outdict['trajectory_files'] = {}
     for video in track.videos:
+        track.outdict['trajectory_files'][video] = []
         for i,fly in enumerate(flytracks[video]):
+            track.outdict['trajectory_files'][video].append(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
             fly.save(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
 
     pprint(track.outdict)
