@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 import os.path as op
+import sys
 from tqdm import tqdm
 
 from anytrack.background import get_background
@@ -13,6 +14,16 @@ from anytrack.roiselect import arenaROIselector
 from anytrack.trajectory import Trajectory
 from anytrack.video import VideoCapture
 from anytrack.yaml_helpers import read_yaml, write_yaml
+
+def PrintException():
+    import linecache
+    exc_type, exc_obj, tb = sys.exc_info()
+    f = tb.tb_frame
+    lineno = tb.tb_lineno
+    filename = f.f_code.co_filename
+    linecache.checkcache(filename)
+    line = linecache.getline(filename, lineno, f.f_globals)
+    print('EXCEPTION IN ({}, LINE {} "{}"): {}'.format(filename, lineno, line.strip(), exc_obj))
 
 def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, thresholding='dark', show=1, n_contours=4, min_size=150, max_size=250, rois=None):
     cap = VideoCapture(video,0)
@@ -38,7 +49,6 @@ def run_bg_subtraction(video, background=None, nframes=0, threshold_level=10, th
                 popidx = areas.index(max(areas))
             print(popidx)
             contours.pop(popidx)
-            raise IndexError
         contour_mapping = [[in_roi(cv2.fitEllipse(cnt)[0],roi) for roi in rois].index(True) for cnt in contours] ### list of roi IDs for each contour
         if len(contours) == n_contours:
             order = contour_mapping
@@ -117,32 +127,6 @@ class Anytracker(object):
         self.outdict_file = outdict_file
         self.background = {}
 
-    def detect_head(self, flytracks):
-        windowlen = 13
-        for video in self.videos:
-            for fly in flytracks[video]:
-                apx = smooth(fly.data[:,12], windowlen)
-                opx = smooth(fly.data[:,13], windowlen)
-                diffs = opx - apx
-                binary = np.sign(diffs)
-                for rl, pos, state in zip(*rle(binary)):
-                    if rl > 10: ### accept only valid switches longer than 10 frames
-                        if state == 1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,8:10]
-                        elif state == -1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,10:12]
-                        else:
-                            print(state, 'WEIRD')
-                    else:
-                        if state == 1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,10:12]
-                        elif state == -1:
-                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,8:10]
-                        else:
-                            print(state, 'WEIRD')
-                fly.data[:,6] = np.arctan2(fly.data[:,3] - fly.data[:,1], fly.data[:,2] - fly.data[:,0])
-        return flytracks
-
     def infer(self, num_contours):
         print('Infer contour statistics...', flush=True)
         if 'number_contours' not in self.outdict:
@@ -217,24 +201,59 @@ class Anytracker(object):
     def run(self, nframes=0, threshold_level=10, thresholding='dark', use_threads=1, show=0):
         print('Run tracking...', flush=True)
         all_tracks = {}
+        self.outdict['trajectory_files'] = {}
         for video in tqdm(self.videos):
             ### run tracking
-            tracks = run_bg_subtraction(    video,
-                                            nframes=nframes,
-                                            background=self.background[video],
-                                            threshold_level=threshold_level,
-                                            thresholding=thresholding,
-                                            n_contours=self.outdict['number_contours'][video],
-                                            min_size=self.outdict['min_size'][video],
-                                            max_size=self.outdict['max_size'][video],
-                                            rois=self.outdict['ROIs'][video],
-                                            show=show,)
-            ### interpolate all signals
+            try:
+                tracks = run_bg_subtraction(    video,
+                                                nframes=nframes,
+                                                background=self.background[video],
+                                                threshold_level=threshold_level,
+                                                thresholding=thresholding,
+                                                n_contours=self.outdict['number_contours'][video],
+                                                min_size=self.outdict['min_size'][video],
+                                                max_size=self.outdict['max_size'][video],
+                                                rois=self.outdict['ROIs'][video],
+                                                show=show,)
+                ### interpolate all signals
+                for fly in tracks:
+                    for i in range(fly.data.shape[1]):
+                        if not all(np.isnan(fly.data[:,i])):
+                            fly.data[:,i] = interpolate(fly.data[:,i])
+                all_tracks[video] = tracks
+            except:
+                all_tracks[video] = None
+                PrintException()
+
             for fly in tracks:
-                for i in range(fly.data.shape[1]):
-                    if not all(np.isnan(fly.data[:,i])):
-                        fly.data[:,i] = interpolate(fly.data[:,i])
-            all_tracks[video] = tracks
+                apx = smooth(fly.data[:,12], windowlen)
+                opx = smooth(fly.data[:,13], windowlen)
+                diffs = opx - apx
+                binary = np.sign(diffs)
+                for rl, pos, state in zip(*rle(binary)):
+                    if rl > 10: ### accept only valid switches longer than 10 frames
+                        if state == 1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,8:10]
+                        elif state == -1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,10:12]
+                        else:
+                            print(state, 'WEIRD')
+                    else:
+                        if state == 1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,10:12]
+                        elif state == -1:
+                            fly.data[pos:pos+rl,2:4] = fly.data[pos:pos+rl,8:10]
+                        else:
+                            print(state, 'WEIRD')
+                fly.data[:,6] = np.arctan2(fly.data[:,3] - fly.data[:,1], fly.data[:,2] - fly.data[:,0])
+
+                ### save tracks
+                self.outdict['trajectory_files'][video] = []
+                for i,fly in enumerate(tracks):
+                    if fly is not None:
+                        self.outdict['trajectory_files'][video].append(op.join(self.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
+                        fly.save(op.join(self.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
+
         return all_tracks
 
 

@@ -33,20 +33,6 @@ def main():
     track.infer(num_contours=num_contours)
     write_yaml(track.outdict_file, track.outdict)
 
-    ### step 5: background subtraction & contour matching & centroid fit & identity (DONE, frame -> contours -> centroid+pixelinfo)
-    #flytracks = track.run(nframes=100, show=0)
-
-    ### step 6: head detection
-    #flytracks = track.detect_head(flytracks)
-
-    ### step 7: writing data
-    track.outdict['trajectory_files'] = {}
-    for video in track.videos:
-        track.outdict['trajectory_files'][video] = []
-        for i,fly in enumerate(flytracks[video]):
-            track.outdict['trajectory_files'][video].append(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
-            fly.save(op.join(track.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
-
     pprint(track.outdict)
     write_yaml(track.outdict_file, track.outdict)
 

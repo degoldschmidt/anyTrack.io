@@ -49,7 +49,10 @@ def get_contour_stats(video, background, force_num_contours=None, num_frames=50,
         frame = cap.get_frame(frameno)
         contours = get_contours(frame, background)
         areas = sorted([cv2.contourArea(cnt) for cnt in contours], key=lambda x: np.abs(x-mean_area))[:int(round(mean_number))]
-        area_contours[i, :] = np.array(areas[:int(round(mean_number))])
+        if force_num_contours is None:
+            area_contours[i, :] = np.array(areas[:int(round(mean_number))])
+        else:
+            area_contours[i, :] = np.array(areas[:force_num_contours])
     if force_num_contours is None:
         return mean_number, np.amin(area_contours), np.amax(area_contours)
     else:

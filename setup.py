@@ -12,7 +12,7 @@ def read(fname):
 
 setup(
     name="anytrack",
-    version="1.0.12",
+    version="1.0.18",
     author="Dennis Goldschmidt",
     author_email="dennis.goldschmidt@neuro.fchampalimaud.org",
     description=("Simple tracking script for arbitrary object tracking in videos."),
