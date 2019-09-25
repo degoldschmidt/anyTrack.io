@@ -6,7 +6,6 @@ import sys
 from tqdm import tqdm
 
 from anytrack.background import get_background
-from anytrack.cli import checkbox
 from anytrack.contours import get_contours, get_contour_stats
 from anytrack.files import get_videos
 from anytrack.helpers import rle, nan_helper, interpolate, smooth, px, dist, in_roi
@@ -226,6 +225,7 @@ class Anytracker(object):
                 PrintException()
 
             for fly in tracks:
+                windowlen=13
                 apx = smooth(fly.data[:,12], windowlen)
                 opx = smooth(fly.data[:,13], windowlen)
                 diffs = opx - apx
@@ -247,12 +247,12 @@ class Anytracker(object):
                             print(state, 'WEIRD')
                 fly.data[:,6] = np.arctan2(fly.data[:,3] - fly.data[:,1], fly.data[:,2] - fly.data[:,0])
 
-                ### save tracks
-                self.outdict['trajectory_files'][video] = []
-                for i,fly in enumerate(tracks):
-                    if fly is not None:
-                        self.outdict['trajectory_files'][video].append(op.join(self.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
-                        fly.save(op.join(self.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
+            ### save tracks
+            self.outdict['trajectory_files'][video] = []
+            for i,fly in enumerate(tracks):
+                if fly is not None:
+                    self.outdict['trajectory_files'][video].append(op.join(self.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
+                    fly.save(op.join(self.outdict['folders']['trajectories'], '{}_fly{}.csv'.format(op.basename(video).split('.')[0],i)))
 
         return all_tracks
 

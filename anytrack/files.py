@@ -1,6 +1,5 @@
 import os
 import os.path as op
-from anytrack.cli import checkbox
 
 def get_videos(input, output, video=None):
     if 'videos' in output:
@@ -13,5 +12,5 @@ def get_videos(input, output, video=None):
         else:
             dir = op.dirname(input)
             videos = [video]
-        videos = [op.join(input, _file) for _file in checkbox('videos', videos, msg='Select videos for tracking:')]
+        #videos = [op.join(input, _file) for _file in checkbox('videos', videos, msg='Select videos for tracking:')]
     return videos, dir

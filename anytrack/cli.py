@@ -1,5 +1,6 @@
 from __future__ import print_function, unicode_literals
-from PyInquirer import style_from_dict, Token, prompt, Separator
+#from PyInquirer import style_from_dict, Token, prompt, Separator
+
 
 def checkbox(name, options, msg=None):
     style = style_from_dict({
