@@ -8,8 +8,10 @@ import uuid
 from pathlib import Path
 import pprint as pp
 import pytrack
+import argparse
 
-from anytrack.video import VideoCapture
+#from anytrack.video import VideoCapture
+from video import VideoCapture
 
 __author__ = "Dennis Goldschmidt"
 __date__ = "29.08.2018"
@@ -34,7 +36,7 @@ class arenaROIselector(object):
         -   radius: radius of arena circle in pixel
         -   angle:  orientation of first inner yeast spot within arena circle
     """
-    def __init__(self, video, setup, windowName=None, nframes=300, random=True, pattern='6_6_radial', method='automated'):
+    def __init__(self, video, setup, windowName=None, nframes=300, random=True, pattern='6_6_radial', method='supervised'):
         self.__scale = 1.6
         self.img, self.original_img = self.init_frame(video, setup, nframes, random)
         self.setup = setup
@@ -53,7 +55,7 @@ class arenaROIselector(object):
             # automatic detection of arenas
             blur = cv2.GaussianBlur(self.original_img.copy()[:,:,0],(5,5),0)
             ret3,th3 = cv2.threshold(blur,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-            contours, hierarchy = cv2.findContours(th3, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours, hierarchy = cv2.findContours(th3, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[-2:]
             self.auto_rois = contours
             for cnt in contours:
                 if len(cnt) > 50:
@@ -245,7 +247,7 @@ class arenaROIselector(object):
                     cv2.circle(img, (px(x), px(y)), px(ma/3), MATCH, 1)
 
 
-        cv2.imshow(self.windowName, img)
+        cv2.imshow(self.windowName, cv2.resize(img, (700,700)))
 
     def next_selected(self):
         self.selected = len(self.ROIs)
@@ -339,6 +341,21 @@ class arenaROIselector(object):
         return rois
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--input')
+    args = parser.parse_args()
+    input = args.input
+    if op.isdir(input):
+        videos = [file for file in sorted(os.listdir(input)) if file.endswith('.avi')]
+    elif op.isfile(input) and input.endswith('.avi'):
+        videos = [args.input]
+        print(cv2.__version__)
+    for video in videos:
+        selector = arenaROIselector(video, 'cam01', pattern=None)
+        rois = selector.get()
+        print(rois)
+        cv2.destroyAllWindows()
+    """
     video = '/media/degoldschmidt/DATA_DENNIS_002/opto_oloop_2019-07-03T15_49_51.avi'
     #folder = '/media/degoldschmidt/DATA_DENNIS_002/backup/2018_08_01/'
     #videos = [op.join(folder, video) for video in os.listdir(folder) if video.endswith('avi') and video.startswith('cam01')]
@@ -350,3 +367,4 @@ if __name__ == "__main__":
     rois = selector.get()
     print(rois)
     cv2.destroyAllWindows()
+    """
